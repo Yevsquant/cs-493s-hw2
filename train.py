@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import Dataset
-from torch.optim import AdamW
 from .model import GPT, GPTConfig
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
@@ -13,11 +12,14 @@ tokenizer.pad_token = tokenizer.eos_token
 model = None
 
 # Seed all randomness for reproducibility
-def set_seed(seed):
+seed = 42
+# TODO the function is emm ...
+def set_seed():
     random.seed(seed)
     np.random.seed(seed)
     torch.random.manual_seed(seed)
     torch.cuda.random.manual_seed(seed)
+set_seed()
 
 # Load custom models
 def get_llm(model_name, cache_dir="models", device="cpu"):
@@ -41,7 +43,7 @@ def build_dataset():
     block_size = 2 ** exponent
     if model is not None and block_size > model.config.block_size:
         block_size = model.config.block_size
-    if model is None and block_size > 16: # hardcoded max block size
+    if model is None and block_size > 16: # hardcode max block size
         block_size = 16
 
     x, y, attn_mask = [], [], []
@@ -49,7 +51,9 @@ def build_dataset():
     for i in range(len(texts)):
         token = encodings["input_ids"][i]  # shape: (T,)
     
-        for j in range(0, len(token) - block_size, block_size):
+        for j in range(0, len(token) - block_size + 1, block_size):
+            if token[j] == tokenizer.pad_token_id:
+                continue
             x.append(token[j:j+block_size])
             y.append(token[j+1:j+1+block_size])
             attn_mask.append(encodings['attention_mask'][i][j:j+block_size])
@@ -66,15 +70,14 @@ def build_dataset():
             y.append(y_)
             attn_mask.append(attn_)
 
-    dataset = Dataset.from_dict({"inputs_ids": x, "attention_mask": attn_mask, "labels": y})
+    dataset = Dataset.from_dict({"input_ids": x, "attention_mask": attn_mask, "labels": y})
     return dataset
 
-def evaluate(model, df_val, criterion, **kargs):
+def evaluate(model, val_dataset, criterion, **kargs):
     eval_batch_size = kargs.get("eval_batch_size", 32)
     device = kargs.get("device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
-    dataset = CustomDataset(df_val)
-    val_dataloader = DataLoader(dataset, batch_size=eval_batch_size, shuffle=False)
+    val_dataloader = DataLoader(val_dataset, batch_size=eval_batch_size, shuffle=False)
 
     model.eval()
     model.to(device)
@@ -100,7 +103,7 @@ def evaluate(model, df_val, criterion, **kargs):
     return {"val_loss": val_loss, "val_acc": acc}
 
 
-def train(df, **kargs): # TODO: hyperparameters, model name + cache dir = model, dataset dir => dataset
+def train(**kargs):
     batch_size = kargs.get("batch_size", 32)
     epochs = kargs.get("epoch", 5)
     lr = kargs.get("learning_rate", 6e-4)
@@ -110,9 +113,6 @@ def train(df, **kargs): # TODO: hyperparameters, model name + cache dir = model,
     model_name = kargs.get("model_name", None)
     cache_dir = kargs.get("cache_dir", None)
     verbose = kargs.get("verbose", True)
-    seed = kargs.get("seed", 42)
-
-    set_seed(42)
 
     if model_name is None or cache_dir is None:
         model = GPT(GPTConfig(n_layer=1))
@@ -120,9 +120,13 @@ def train(df, **kargs): # TODO: hyperparameters, model name + cache dir = model,
         model = get_llm(model_name, cache_dir, device)
     model.to(device)
 
-    df_train, df_val = train_test_split(df, test_size=0.2, random_state=seed)
-    dataset = CustomDataset(df_train)
-    train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    # TODO instead build a dataset in train.py, it is better that the dataset exists and load it from somewhere
+    dataset = build_dataset()
+    split_dataset = dataset.train_test_split(test_size=0.1)
+    train_dataset = split_dataset["train"]
+    train_dataset = train_dataset.shuffle(seed=seed)
+    val_dataset = split_dataset["test"]
+    batched_train_dataset = train_dataset.batch(batch_size=batch_size)
 
     criterion = kargs.get("criterion", nn.CrossEntropyLoss())
     optimizer = model.configure_optimizers(
@@ -149,9 +153,10 @@ def train(df, **kargs): # TODO: hyperparameters, model name + cache dir = model,
         model.train()
         train_correct, train_samples = 0, 0
         train_epoch_loss = 0.0
-        for batch in train_dataloader:
-            X_batch = batch['inputs'].to(device)
-            y_batch = batch['labels'].to(device)
+        for batch in batched_train_dataset:
+            X_batch = torch.tensor(batch['input_ids']).to(device)
+            y_batch = torch.tensor(batch['labels']).to(device)
+            attention_mask = torch.tensor(batch['attention_mask']).to(device)
 
             optimizer.zero_grad()
             y_batch_pred = model(X_batch)
@@ -164,12 +169,12 @@ def train(df, **kargs): # TODO: hyperparameters, model name + cache dir = model,
             train_correct += correct.sum().item()
             train_samples += len(batch)
 
-        train_epoch_loss /= len(train_dataloader)
+        train_epoch_loss /= len(train_dataset)
         train_acc = float(train_correct) / train_samples
         train_metrics.append({"train_loss": train_epoch_loss, "train_acc": train_acc})
 
         # val loss and acc in a single epoch
-        eval_metrics = evaluate(model, df_val, criterion, eval_batch_size=32, device=device)
+        eval_metrics = evaluate(model, val_dataset, criterion, eval_batch_size=32, device=device)
         val_metrics.append(eval_metrics)
 
         if verbose:
