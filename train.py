@@ -16,27 +16,27 @@ from model import GPT, GPTConfig
 # Setup
 tokenizer = AutoTokenizer.from_pretrained('gpt2')
 tokenizer.pad_token = tokenizer.eos_token
-block_size = 8
+block_size = 16
 model_config = GPTConfig(
     block_size = block_size,
     vocab_size = tokenizer.vocab_size,
     n_layer = 1,
-    #n_head = 6,
-    #n_embd = 384,
+    # n_head = 4,
+    # n_embd = 128,#384,
     dropout = 0.0
 )
 model_cache_dir = "models"
 model_checkpoints = "models/checkpoints"
 model = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-save_steps = 250
+save_steps = 1000
 dataset_cache_dir = "nampdn-ai/tiny-textbooks"
 dataset = None # DatasetDict
 seed = 42
 
 # Hyper parameters
 batch_size = 1 # 1 for overfit, 32
-num_train_epochs = 500 # 200 for overfit, 10
+num_train_epochs = 500 # 2000 for overfit, 10
 learning_rate = 5e-4 # AdamW
 weight_decay = 0.0 # overfit
 betas = (0.9, 0.95)
@@ -59,18 +59,18 @@ def group_texts(examples):
     return result
 
 # Overfit for sanity check
-text = "I love machine learning"
+text = "I love machine learning" + tokenizer.eos_token
 def overfit_dataset():
     # Tokenize
-    tokens = tokenizer(text, return_tensors="pt")
-    inputs = tokens["input_ids"][0][:-1]
-    labels = tokens["input_ids"][0][1:].clone()
+    tokens = tokenizer(text, padding='max_length', max_length=block_size, truncation=True, return_tensors="pt")
+    inputs = tokens["input_ids"][0].clone()
+    labels = tokens["input_ids"][0].clone()
     labels[0] = -100 # as required
 
     # Add batch dimension
     inputs = inputs.unsqueeze(0)
     labels = labels.unsqueeze(0)
-    attention_mask = tokens["attention_mask"][0][:inputs.shape[1]].unsqueeze(0) # might drop
+    attention_mask = tokens["attention_mask"][0].unsqueeze(0) # might drop if no needed
 
     # Create a dataset
     ds = Dataset.from_dict({
@@ -126,7 +126,7 @@ class GPTTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
-        logits = model(inputs["input_ids"]) # **inputs
+        logits = model(inputs["input_ids"], inputs["attention_mask"]) # **inputs
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-100)
         return (loss, logits) if return_outputs else loss
 
@@ -173,7 +173,7 @@ def train(**kargs):
     trainer.train()
 
 # Move to inference, might ref from nanoGPT
-def generate_greedy(model, tokenizer, prompt, max_new_tokens=50, temperature=1.0):
+def generate_greedy(model, tokenizer, prompt, max_new_tokens=50, temperature=1.0, top_k=None):
     model.eval()
     device = next(model.parameters()).device
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
@@ -188,6 +188,9 @@ def generate_greedy(model, tokenizer, prompt, max_new_tokens=50, temperature=1.0
             logits = logits[:, -1, :] / temperature
 
             # from nanoGPT
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float('Inf')
             probs = F.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
 
@@ -200,5 +203,5 @@ if __name__ == "__main__":
     train(sanity_check=True)
 
     model.eval()
-    output = generate_greedy(model, tokenizer, "I love machine", max_new_tokens=5)
+    output = generate_greedy(model, tokenizer, "I love machine", max_new_tokens=10, top_k=3)
     print(tokenizer.decode(output[0], skip_special_tokens=True, clean_up_tokenization_spaces=True))
