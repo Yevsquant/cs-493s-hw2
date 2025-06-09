@@ -1,198 +1,204 @@
-import random
-import math
-import numpy as np
+from itertools import chain
+
 import torch
-import torch.nn as nn
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from datasets import Dataset
-from .model import GPT, GPTConfig
+import torch.nn.functional as F
+from datasets import Dataset, DatasetDict, load_dataset
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForLanguageModeling,
+)
 
-tokenizer = AutoTokenizer.from_pretrained("gpt2")
+from model import GPT, GPTConfig
+
+# Setup
+tokenizer = AutoTokenizer.from_pretrained('gpt2')
 tokenizer.pad_token = tokenizer.eos_token
+block_size = 8
+model_config = GPTConfig(
+    block_size = block_size,
+    vocab_size = tokenizer.vocab_size,
+    n_layer = 1,
+    #n_head = 6,
+    #n_embd = 384,
+    dropout = 0.0
+)
+model_cache_dir = "models"
+model_checkpoints = "models/checkpoints"
 model = None
-
-# Seed all randomness for reproducibility
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+save_steps = 250
+dataset_cache_dir = "nampdn-ai/tiny-textbooks"
+dataset = None # DatasetDict
 seed = 42
-# TODO the function is emm ...
-def set_seed():
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.random.manual_seed(seed)
-    torch.cuda.random.manual_seed(seed)
-set_seed()
 
-# Load custom models
-def get_llm(model_name, cache_dir="models", device="cpu"):
+# Hyper parameters
+batch_size = 1 # 1 for overfit, 32
+num_train_epochs = 500 # 200 for overfit, 10
+learning_rate = 5e-4 # AdamW
+weight_decay = 0.0 # overfit
+betas = (0.9, 0.95)
+train_and_val_ratio = 0.1
+
+def tokenize_function(example):
+    return tokenizer(example["text"])
+
+def group_texts(examples):
+    global block_size
+    concatenated = {k: list(chain(*examples[k])) for k in examples.keys()}
+    total_length = len(concatenated["input_ids"]) # should be same as concatenated[list(examples.keys())[0]]
+    if total_length >= block_size:
+        total_length = (total_length // block_size) * block_size
+    result = {
+        k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
+        for k, t in concatenated.items()
+    }
+    result["labels"] = result["input_ids"].copy()
+    return result
+
+# Overfit for sanity check
+text = "I love machine learning"
+def overfit_dataset():
+    # Tokenize
+    tokens = tokenizer(text, return_tensors="pt")
+    inputs = tokens["input_ids"][0][:-1]
+    labels = tokens["input_ids"][0][1:].clone()
+    labels[0] = -100 # as required
+
+    # Add batch dimension
+    inputs = inputs.unsqueeze(0)
+    labels = labels.unsqueeze(0)
+    attention_mask = tokens["attention_mask"][0][:inputs.shape[1]].unsqueeze(0) # might drop
+
+    # Create a dataset
+    ds = Dataset.from_dict({
+        "input_ids": [inputs[0]],
+        "attention_mask": [attention_mask[0]],
+        "labels": [labels[0]],
+    })
+
+    dataset = DatasetDict({
+        "train": ds,
+        "validation": ds,
+        "test": ds
+    })
+    return dataset
+
+# Load models
+def get_llm(model_name):
     model = AutoModelForCausalLM.from_pretrained(
-        cache_dir + "/" + model_name,
+        model_cache_dir + "/" + model_name,
         # torch_dtype=torch.float16
     )
     model.to(device)
     return model
 
-# data for training
-# temprary data for testing the infrastructure of train.py
-texts = ["I love machine learning",
-         "There is no apple",
-         "This is not a serious program"]
+# Load dataset
+def get_dataset(sanity_check=False):
+    global dataset
+    if sanity_check: # do overfitting
+        dataset = overfit_dataset()
+    else:
+        raw_dataset = load_dataset(dataset_cache_dir)
+        if "validation" not in raw_dataset.keys():
+            ds = raw_dataset['train'].train_test_split(test_size=train_and_val_ratio, seed=seed)
+            ds = DatasetDict({
+                "train": ds["train"],
+                "validation": ds["test"],
+                "test": raw_dataset["test"]
+            })
+        ds = ds.map(tokenize_function, batched=True, remove_columns=["text"])
+        dataset = ds.map(group_texts, batched=True)
 
-def build_dataset():
-    encodings = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=1024)
-    exponent = round(math.log2(len(encodings["input_ids"][0])))
-    # find a proper block size which should be less than model.config.block_size
-    block_size = 2 ** exponent
-    if model is not None and block_size > model.config.block_size:
-        block_size = model.config.block_size
-    if model is None and block_size > 16: # hardcode max block size
-        block_size = 16
+class GPTTrainer(Trainer):
+    """
+    def create_optimizer(self):
+        optimizer = model.configure_optimizers(
+            weight_decay=weight_decay,
+            learning_rate=learning_rate,
+            betas=betas,
+            device_type=device
+        )
+        return optimizer
+    """
 
-    x, y, attn_mask = [], [], []
-    # TODO: might vectorize part of the process to speed up
-    for i in range(len(texts)):
-        token = encodings["input_ids"][i]  # shape: (T,)
-    
-        for j in range(0, len(token) - block_size + 1, block_size):
-            if token[j] == tokenizer.pad_token_id:
-                continue
-            x.append(token[j:j+block_size])
-            y.append(token[j+1:j+1+block_size])
-            attn_mask.append(encodings['attention_mask'][i][j:j+block_size])
-        
-        # short sequence with padding (T < block_size)
-        leftover = len(token) % block_size
-        if leftover > 1:
-            idx_for_short_seq = len(token) - leftover
-            diff = block_size - leftover
-            x_ = torch.cat([token[idx_for_short_seq:idx_for_short_seq+block_size], torch.tensor([tokenizer.pad_token_id] * diff)], dim=0)
-            y_ = torch.cat([token[idx_for_short_seq+1:idx_for_short_seq+1+block_size], torch.tensor([tokenizer.pad_token_id] * diff)], dim=0)
-            attn_ = torch.cat([encodings['attention_mask'][i][idx_for_short_seq:idx_for_short_seq+block_size], torch.tensor([0] * diff)], dim=0)
-            x.append(x_)
-            y.append(y_)
-            attn_mask.append(attn_)
-
-    dataset = Dataset.from_dict({"input_ids": x, "attention_mask": attn_mask, "labels": y})
-    return dataset
-
-def evaluate(model, val_dataset, criterion, **kargs):
-    eval_batch_size = kargs.get("eval_batch_size", 32)
-    device = kargs.get("device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-
-    val_dataloader = DataLoader(val_dataset, batch_size=eval_batch_size, shuffle=False)
-
-    model.eval()
-    model.to(device)
-
-    val_loss = 0.0
-    val_correct, val_samples = 0, 0
-
-    with torch.no_grad():
-        for batch in val_dataloader:
-            X_batch = batch['inputs'].to(device)
-            y_batch = batch['labels'].to(device)
-
-            y_batch_pred = model(X_batch)
-            batch_loss = criterion(y_batch_pred, y_batch)
-            val_loss += batch_loss.item()
-            correct = ... # TODO
-            val_correct += correct.sum().item()
-            val_samples += len(batch)
-
-    val_loss /= len(val_dataloader)
-    acc = float(val_correct) / val_samples
-
-    return {"val_loss": val_loss, "val_acc": acc}
-
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        labels = inputs.pop("labels")
+        logits = model(inputs["input_ids"]) # **inputs
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-100)
+        return (loss, logits) if return_outputs else loss
 
 def train(**kargs):
-    batch_size = kargs.get("batch_size", 32)
-    epochs = kargs.get("epoch", 5)
-    lr = kargs.get("learning_rate", 6e-4)
-    wd = kargs.get("weight_decay", 1e-1)
-    betas = kargs.get("betas", (0.9, 0.95))
-    device = kargs.get("device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    # Model for training
+    global model
     model_name = kargs.get("model_name", None)
-    cache_dir = kargs.get("cache_dir", None)
-    verbose = kargs.get("verbose", True)
-
-    if model_name is None or cache_dir is None:
-        model = GPT(GPTConfig(n_layer=1))
+    if model_name is None or model_cache_dir is None:
+        model = GPT(model_config)
     else:
-        model = get_llm(model_name, cache_dir, device)
+        model = get_llm(model_name)
     model.to(device)
 
-    # TODO instead build a dataset in train.py, it is better that the dataset exists and load it from somewhere
-    dataset = build_dataset()
-    split_dataset = dataset.train_test_split(test_size=0.1)
-    train_dataset = split_dataset["train"]
-    train_dataset = train_dataset.shuffle(seed=seed)
-    val_dataset = split_dataset["test"]
-    batched_train_dataset = train_dataset.batch(batch_size=batch_size)
+    # Dataset for training
+    sanity_check = kargs.get("sanity_check", False)
+    get_dataset(sanity_check)
 
-    criterion = kargs.get("criterion", nn.CrossEntropyLoss())
-    optimizer = model.configure_optimizers(
-        weight_decay=wd,
-        learning_rate=lr,
-        betas=betas,
-        device_type=device
+    training_args = TrainingArguments(
+        output_dir=model_checkpoints,
+        overwrite_output_dir=True,
+        per_device_train_batch_size=batch_size,
+        num_train_epochs=num_train_epochs,
+        logging_steps=10,
+        save_steps=save_steps,
+        save_safetensors=False, # safetensors not support saving shared weights
+        learning_rate=learning_rate,
+        warmup_steps=0,
+        weight_decay=weight_decay,
+        report_to="none",
+        remove_unused_columns=False,
     )
 
-    setup_and_hyperparameters = {
-        "criterion": criterion.__class__.__name__,
-        "optimizer": optimizer.__class__.__name__,
-        "batch_size": batch_size,
-        "epoch": epochs,
-        "learning_rate": lr,
-        "weight_decay": wd,
-        "betas": betas
-    }
+    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-    train_metrics = []
-    val_metrics = []
+    trainer = GPTTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset['train'],
+        eval_dataset=dataset['validation'],
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+    )
 
-    for epo in range(epochs):
-        model.train()
-        train_correct, train_samples = 0, 0
-        train_epoch_loss = 0.0
-        for batch in batched_train_dataset:
-            X_batch = torch.tensor(batch['input_ids']).to(device)
-            y_batch = torch.tensor(batch['labels']).to(device)
-            attention_mask = torch.tensor(batch['attention_mask']).to(device)
+    trainer.train()
 
-            optimizer.zero_grad()
-            y_batch_pred = model(X_batch)
-            batch_loss = criterion(y_batch_pred, y_batch)
-            batch_loss.backward()
-            optimizer.step()
+# Move to inference, might ref from nanoGPT
+def generate_greedy(model, tokenizer, prompt, max_new_tokens=50, temperature=1.0):
+    model.eval()
+    device = next(model.parameters()).device
+    input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
-            train_epoch_loss += batch_loss.item()
-            correct = ... # TODO
-            train_correct += correct.sum().item()
-            train_samples += len(batch)
+    for _ in range(max_new_tokens):
+        input_cond = input_ids
+        if input_ids.size(1) > model.config.block_size:
+            input_cond = input_ids[:, -model.config.block_size:]
 
-        train_epoch_loss /= len(train_dataset)
-        train_acc = float(train_correct) / train_samples
-        train_metrics.append({"train_loss": train_epoch_loss, "train_acc": train_acc})
+        with torch.no_grad():
+            logits = model(input_cond)
+            logits = logits[:, -1, :] / temperature
 
-        # val loss and acc in a single epoch
-        eval_metrics = evaluate(model, val_dataset, criterion, eval_batch_size=32, device=device)
-        val_metrics.append(eval_metrics)
+            # from nanoGPT
+            probs = F.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
 
-        if verbose:
-            print(
-                "Epoch: %.d, Train Loss: %.4f, Train Acc: %.4f, "
-                "Val Loss: %.4f, Val Acc: %.4f" % (
-                    epo + 1,
-                    train_epoch_loss,
-                    train_acc,
-                    eval_metrics["val_loss"],
-                    eval_metrics["val_acc"]
-                )
-            )
+        input_ids = torch.cat((input_ids, next_token), dim=1)
 
-    new_model_name = ""
-    for value in setup_and_hyperparameters.values():
-        new_model_name += f"_{value}"
-    new_model_name = new_model_name[1:]
-    model.save_pretrained(cache_dir+"/"+new_model_name)
+    return input_ids
 
-    return setup_and_hyperparameters, train_metrics, val_metrics
+if __name__ == "__main__":
+    # Train the model
+    train(sanity_check=True)
+
+    model.eval()
+    output = generate_greedy(model, tokenizer, "I love machine", max_new_tokens=5)
+    print(tokenizer.decode(output[0], skip_special_tokens=True, clean_up_tokenization_spaces=True))
