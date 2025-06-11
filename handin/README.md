@@ -103,3 +103,11 @@ python3 train23.py . \
 ### 2.4 Ablations/Analysis
 Increase the size of the dataset helps gorkking on division task faster and reliable in validation, not training. As shown,
 ![dataset](largedataset.png) \
+
+
+### 2.3 Grokking
+
+
+### 2.4 Ablations/Analysis
+In arithmetic grokking tasks, when the number of training set samples is too small, the model tends to remember first and then generalize, while sufficient data often shortens or completely eliminates this "silent period". To verify whether the expanded dataset can also accelerate grokking in our implementation, we compared xxxx different samples size and found that as the number of training samples increased, the change of steps decreased almost linearly
+
