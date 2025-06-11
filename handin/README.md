@@ -1,4 +1,6 @@
 ## Part 1
+![d798bfb2d7cd0b08ad887dc5b9d99cb](https://github.com/user-attachments/assets/ada5a754-f6e6-49ec-8c19-fefa2747c77b)
+<img width="969" alt="199e869f4678f994b9b9fecfe46d78d" src="https://github.com/user-attachments/assets/c9294e5b-cbf8-423d-8410-b20b5455383d" />
 
 ## Part 2
 ### 2.1 Data Generation
