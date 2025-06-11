@@ -56,33 +56,20 @@ with open(path_prefix / f"test_{fname}.txt", "w") as f:
 ```
 
 ### 2.2 Warmup - Addition and Subtraction Experiments
-seed=493_train_loss
-![seed=493_train_loss](493_all_train_loss.png) \
-seed=493_test_loss
-![seed=493_val_loss](493_all_val_loss.png) \
-seed=493_train_acc
-![seed=493_train_acc](493_all_train_acc.png) \
-seed=493_test_acc
-![seed=493_val_acc](493_all_val_acc.png) \
-seed=599_train_loss
-![seed=599_train_loss](599_all_train_loss.png) \
-seed=599_test_loss
-![seed=599_val_loss](599_all_val_loss.png) \
-seed=599_train_acc
-![seed=599_train_acc](599_all_train_acc.png) \
-seed=599_test_acc
-![seed=599_val_acc](599_all_val_acc.png) \
-seed=42_train_loss
-![seed=42_train_loss](42_all_train_loss.png) \
-seed=42_test_loss
-![seed=42_val_loss](42_all_val_loss.png) \
-seed=42_train_acc
-![seed=42_train_acc](42_all_train_acc.png) \
-seed=42_test_acc
-![seed=42_val_acc](42_all_val_acc.png) \
-Final loss is 0.0, and accuracy is 1.0 across three seeds. \
-[Checkpoint](/models/mod_checkpoints_warmup/model) \
-(There might be error in formating the metrics computing the accuracies and losses; also, train acc is computed through batches, while validation acc is computed across the entire validation dataset, we replace it with other code in 2.3)
+seed=0 loss
+![seed=0 loss](seed0_loss_curves.png) \
+seed=0 acc
+![seed=0 acc](seed0_acc_curves.png) \
+seed=1 loss
+![seed=1 loss](seed1_loss_curves.png) \
+seed=1 acc
+![seed=1 acc](seed1_acc_curves.png) \
+seed=2 loss
+![seed=2 loss](seed2_loss_curves.png) \
+seed=2 acc
+![seed=2 acc](seed2_acc_curves.png) \
+[Checkpoint](/part2/ckpt_task22) \
+Through three seeds of experiments, we noticed that p=113 is harder to learn than using p=97. We guessed that this is because p=113 has larger data diversity. Therefore, under same situation, data of p=113 is more complex to be learned while our model remained relatively simple. The final loss in test dataset across three seeds is 1.3807 for p=97 and 1.3757 for p=113. The final accuracy in test dataset across three seeds is 0.7563 for p=97 and 0.6045 for p=113.
 
 ### 2.3 Grokking
 ![loss](lossd23.png) \

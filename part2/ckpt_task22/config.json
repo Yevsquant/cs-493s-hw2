@@ -1,0 +1,1 @@
+{"block_size": 9, "vocab_size": 17, "n_layer": 2, "n_head": 4, "n_embd": 128, "dropout": 0.1, "bias": false, "tokenizer": "gpt2"}

@@ -53,7 +53,7 @@ def main() -> None:
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--max_iters", type=int, default=5000)
-    parser.add_argument("--eval_interval", type=int, default=500)
+    parser.add_argument("--eval_interval", type=int, default=100)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -62,7 +62,7 @@ def main() -> None:
     set_seed(args.seed)
 
     text = load_data(args.data)
-    vocab = sorted(list(set(text)))
+    vocab = sorted(list(set(text))) # chars
     stoi = {ch: i for i, ch in enumerate(vocab)}
     itos = {i: ch for ch, i in stoi.items()}
 
@@ -99,6 +99,7 @@ def main() -> None:
         if step % args.eval_interval == 0:
             print(f"Step {step} Loss {loss.item():.4f}") # type: ignore
 
+    # Save checkpoint
     ckpt = {
         "model": model.state_dict(),
         "config": asdict(config),
