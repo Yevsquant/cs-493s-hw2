@@ -73,5 +73,5 @@ with open(path_prefix / f"test_{fname}.txt", "w") as f:
 
 
 ### 2.4 Ablations/Analysis
-
+In arithmetic grokking tasks, when the number of training set samples is too small, the model tends to remember first and then generalize, while sufficient data often shortens or completely eliminates this "silent period". To verify whether the expanded dataset can also accelerate grokking in our implementation, we compared xxxx different samples and found that as the number of training samples increased, the change of steps decreased almost linearly
 
