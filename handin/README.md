@@ -1,5 +1,23 @@
 ## Part 1
+The goal of this is to enable the model to recite the content in textfile.txt completely. By default, the loss can be reduced to 0 within thousands of steps using only the CPU.
+Execute the following instructions:
+python train.py /path/to/textfile.txt \
+    --n_layer 1 --n_head 2 --n_embd 32 \
+    --block_size 16 --batch_size 1 \
+    --out_dir ckpt
 ![d798bfb2d7cd0b08ad887dc5b9d99cb](https://github.com/user-attachments/assets/ada5a754-f6e6-49ec-8c19-fefa2747c77b)
+
+If everything is normal, it should print out the complete sentences of the training text, for example: I love machine learning.
+
+train23.py demonstrates how the model learns integer arithmetic operations at the character level. By default, it can also converge quickly on the CPU.
+python train23.py . \
+    --prime 97 \
+    --operators "+-/" \
+    --n_layer 1 \
+    --max_iters 10000 \
+    --eval_interval 100 \
+    --batch_size 32 \
+    --device cpu
 <img width="969" alt="199e869f4678f994b9b9fecfe46d78d" src="https://github.com/user-attachments/assets/c9294e5b-cbf8-423d-8410-b20b5455383d" />
 
 ## Part 2
