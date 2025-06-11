@@ -103,7 +103,7 @@ python3 train23.py . \
 ### 2.4 Ablations/Analysis
 Increase the size of the dataset helps gorkking on division task faster and reliable in validation, not training. As shown,
 ![dataset](largedataset.png) \
-Under the condition of small samples, the model quickly remembers the training set (Acc ≈ 1.0), but due to insufficient patterns, extrapolation is impossible, and the validation set remains near random guessing (≈ 1/97 ≈ 0.49). This is precisely what is called the silent period in grokking's literature
+Under the condition of small samples, the model quickly remembers the training set (Acc is about 1.0), but due to insufficient patterns, extrapolation is impossible, and the validation set remains near random guessing (about 0.49). This is precisely what is called the silent period in grokking's literature
 
 In the large sample setting, although the memory stage slows down, the verification accuracy significantly improves with training. The gap of the training-verification curve Narrows from approximately 0.5 initially to approximately 0.38, indicating that the model learns the generalizable internal representation earlier.
 
