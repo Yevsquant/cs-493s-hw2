@@ -6,7 +6,7 @@ ps = [97, 113]
 
 def generate_data(p, num_samples):
     data = []
-    ops = ['+', '-', '/']
+    ops = ['/']
 
     while len(data) < num_samples:
         # randomly choose a, b, and the operator
@@ -26,7 +26,7 @@ def generate_data(p, num_samples):
             except ValueError:
                 continue
 
-        data.append(f"{a}{op}{b}={c}")
+        data.append(f"{a} {op} {b} = {c}")
 
     return data
 
@@ -42,18 +42,18 @@ def split_and_save(data, path_prefix, fname):
 
     path_prefix.mkdir(parents=True, exist_ok=True)
 
-    with open(path_prefix / f"train_{fname}.txt", "w") as f:
+    with open(path_prefix / f"traind_{fname}.txt", "w") as f:
         f.write("\n".join(data[:train_end]))
 
-    with open(path_prefix / f"val_{fname}.txt", "w") as f:
+    with open(path_prefix / f"vald_{fname}.txt", "w") as f:
         f.write("\n".join(data[train_end:val_end]))
 
-    with open(path_prefix / f"test_{fname}.txt", "w") as f:
+    with open(path_prefix / f"testd_{fname}.txt", "w") as f:
         f.write("\n".join(data[val_end:]))
 
 def main():
     data = []
-    total_samples_per_p = 3000  # There are in total 113 * 113 * 3 + 97 * 97 * 3 = 66534 samples
+    total_samples_per_p = 5000  # There are in total 113 * 113 * 3 + 97 * 97 * 3 = 66534 samples
     for p in ps:
         data.extend(generate_data(p, total_samples_per_p))
         split_and_save(data, Path(f"./AlgorithmicTasks"), f"p{p}")

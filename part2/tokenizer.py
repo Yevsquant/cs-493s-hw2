@@ -107,13 +107,13 @@ class BinaryOpsTokenizer:
 
         return cls(vocab=vocab)
 
-# test the tokenizer   
-if __name__ == '__main__':
-    tkn = BinaryOpsTokenizer(vocab, inv_vocab)
-    expr = "12+7=19"
-    exprs = ["12+7=19","12+7=19","12+7=9"]
-    block_size = 12
-    tokens = tkn(exprs)
-    print("Encoded:", tokens)
-    decoded = tkn.decode(tokens["input_ids"][0])
-    print("Decoded:", decoded)
+# # test the tokenizer   
+# if __name__ == '__main__':
+#     tkn = BinaryOpsTokenizer(vocab, inv_vocab)
+#     expr = "12+7=19"
+#     exprs = ["12+7=19","12+7=19","12+7=9"]
+#     block_size = 12
+#     tokens = tkn(exprs)
+#     print("Encoded:", tokens)
+#     decoded = tkn.decode(tokens["input_ids"][0])
+#     print("Decoded:", decoded)

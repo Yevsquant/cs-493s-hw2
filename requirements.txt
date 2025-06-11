@@ -1,5 +1,7 @@
-# Require version specified
+# Require version specified python==3.12.3
 torch
 transformers==4.52.3
 datasets
 accelerate==1.7.0
+tensorboardX
+tensorboard
