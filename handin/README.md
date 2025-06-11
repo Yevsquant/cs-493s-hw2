@@ -47,3 +47,11 @@ with open(path_prefix / f"test_{fname}.txt", "w") as f:
 ```
 
 ### 2.2 Warmup - Addition and Subtraction Experiments
+
+
+### 2.3 Grokking
+
+
+### 2.4 Ablations/Analysis
+
+
