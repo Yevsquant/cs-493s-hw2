@@ -3,6 +3,8 @@
 ### Prof. Sewoong Oh
 **Due: Tuesday, June 10th at 11:59pm**
 
+# SUBMITTED IN HANDIN
+
 ## Instructions
 - Please submit this homework to Gradescope.
 - Submit the code, as well as a report containing the plots and discussion. Also include a README, along with instructions to run your code.
