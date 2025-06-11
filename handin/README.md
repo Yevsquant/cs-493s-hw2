@@ -103,11 +103,9 @@ python3 train23.py . \
 ### 2.4 Ablations/Analysis
 Increase the size of the dataset helps gorkking on division task faster and reliable in validation, not training. As shown,
 ![dataset](largedataset.png) \
+Under the condition of small samples, the model quickly remembers the training set (Acc ≈ 1.0), but due to insufficient patterns, extrapolation is impossible, and the validation set remains near random guessing (≈ 1/97 ≈ 0.49). This is precisely what is called the silent period in grokking's literature
 
+In the large sample setting, although the memory stage slows down, the verification accuracy significantly improves with training. The gap of the training-verification curve Narrows from approximately 0.5 initially to approximately 0.38, indicating that the model learns the generalizable internal representation earlier.
 
-### 2.3 Grokking
-
-
-### 2.4 Ablations/Analysis
-In arithmetic grokking tasks, when the number of training set samples is too small, the model tends to remember first and then generalize, while sufficient data often shortens or completely eliminates this "silent period". To verify whether the expanded dataset can also accelerate grokking in our implementation, we compared xxxx different samples size and found that as the number of training samples increased, the change of steps decreased almost linearly
+Therefore, in the arithmetic grokking task, the number of training samples is the primary factor determining the generalization speed and final performance. If hardware and time permit, prioritizing the increase of data volume is more effective in eliminating the grokking phenomenon than adjusting the learning rate or regularization in isolation.
 
