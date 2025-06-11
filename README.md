@@ -3,7 +3,7 @@
 ### Prof. Sewoong Oh
 **Due: Tuesday, June 10th at 11:59pm**
 
-# SUBMITTED IN HANDIN
+# *SUBMITTED IN HANDIN*
 
 ## Instructions
 - Please submit this homework to Gradescope.
