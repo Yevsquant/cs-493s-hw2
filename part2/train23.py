@@ -3,56 +3,44 @@ import json
 import os
 import random
 from typing import List, Tuple
+import time
 
 import torch
 from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
+from transformers import get_scheduler
 
 from model import GPT, GPTConfig
 
+# Hyper parameter
+learning_rate = 1e-3
+betas = (0.9, 0.98)
+weight_decay = 1.0
 
 class ArithmeticDataset(Dataset):
-    """Dataset for arithmetic expressions.
-
-    This class reads the provided ``train.txt``, ``val.txt`` or ``test.txt``
-    file and filters the examples based on the desired operator and prime.  The
-    text in the file is already generated for the homework and this class simply
-    converts each line into a pair of token sequences suitable for training the
-    character-level model.
-    """
-
-    def __init__(self, path: str, stoi: dict, block_size: int, operators: List[str], prime: int | None = None, pad_token: str = "<pad>"):
+    def __init__(self, path: str, stoi: dict[str, int], block_size: int = 16):
+        self.data: List[Tuple[torch.Tensor, torch.Tensor]] = []
         self.stoi = stoi
         self.block_size = block_size
-        self.pad_idx = stoi[pad_token]
-        self.data: List[Tuple[torch.Tensor, torch.Tensor]] = []
+        self.pad_idx = self.stoi["<pad>"]
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                a, op, b, _, c = line.split()
-                if op not in operators:
-                    continue
-                a, b, c = int(a), int(b), int(c)
-                if prime is not None:
-                    if op == "+" and (a + b) % prime != c:
-                        continue
-                    if op == "-" and (a - b) % prime != c:
-                        continue
-                    if op == "/" and (b * c) % prime != a:
-                        continue
-                line = line + "\n"
+                line += "\n" # \n is end of the seq, same as <eos>
                 tokens = [stoi[ch] for ch in line]
-                tokens = tokens[: block_size]
-                pad_len = block_size - len(tokens)
-                tokens += [self.pad_idx] * pad_len
-                x = torch.tensor(tokens[:-1], dtype=torch.long)
-                y = torch.tensor(tokens[1:], dtype=torch.long)
-                out_start = line.index("=") + 2
-                target = y.clone()
-                target[: out_start - 1] = -100
-                self.data.append((x, target))
+                input_tokens = tokens[:line.index("=")+1] # everything before = (include =)
+                output_tokens = tokens[line.index("=")+1:] # everything after =
+
+                # pad (assume block_size always greater than the size of line)
+                x = input_tokens + [self.pad_idx] * (self.block_size - len(input_tokens))
+                y = [-100] * len(input_tokens) + output_tokens
+                y = y[:self.block_size] + [-100] * (self.block_size - len(y))
+
+                x = torch.tensor(x, dtype=torch.long)
+                y = torch.tensor(y, dtype=torch.long)
+                self.data.append((x, y))
 
     def __len__(self) -> int:
         return len(self.data)
@@ -67,12 +55,8 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
-def build_vocab(paths: List[str]) -> Tuple[List[str], dict, dict]:
-    chars = set()
-    for p in paths:
-        with open(p, "r", encoding="utf-8") as f:
-            chars.update(set(f.read()))
-    chars.add("\n")
+def build_vocab() -> Tuple[List[str], dict, dict]:
+    chars = list("0123456789+-/= \n")
     vocab = ["<pad>"] + sorted(chars)
     stoi = {ch: i for i, ch in enumerate(vocab)}
     itos = {i: ch for ch, i in stoi.items()}
@@ -100,15 +84,9 @@ def evaluate(model: GPT, loader: DataLoader, device: torch.device) -> Tuple[floa
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train model for arithmetic tasks")
     parser.add_argument("data_dir", type=str, help="Directory with train.txt, val.txt, test.txt")
-    parser.add_argument("--prime", type=int, choices=[97, 113], required=True)
-    parser.add_argument(
-    "--operators",
-    type=str,
-    default="+-/",
-    help="Which operations to train on, e.g. '+-/' (no spaces)",
-    )
+    parser.add_argument("--prime", type=int, default=97)
 
-    parser.add_argument("--out_dir", type=str, default="ckpt_task22")
+    parser.add_argument("--out_dir", type=str, default="ckpt_task23")
     parser.add_argument("--n_layer", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--max_iters", type=int, default=1000)
@@ -120,37 +98,45 @@ def main() -> None:
     set_seed(args.seed)
     os.makedirs(args.out_dir, exist_ok=True)
 
-    paths = [os.path.join(args.data_dir, f) for f in ["AlgorithmicTasks/traind_p97.txt", "AlgorithmicTasks/vald_p97.txt", "AlgorithmicTasks/testd_p97.txt"]]
-    vocab, stoi, itos = build_vocab(paths)
-    block_size = max(len(line.strip()) + 1 for p in paths for line in open(p))
+    paths = [os.path.join(args.data_dir, f) for f in [
+        f"AlgorithmicTasks/train_division_10000_all500.txt",
+        f"AlgorithmicTasks/val_division_10000_all500.txt",
+        f"AlgorithmicTasks/test_division_10000_all500.txt"]]
+    vocab, stoi, itos = build_vocab()
+    block_size = 16
 
-    # train_dataset = ArithmeticDataset(paths[0], stoi, block_size, [args.operator], args.prime)
-    # val_dataset = ArithmeticDataset(paths[1], stoi, block_size, [args.operator], args.prime)
-    # test_dataset = ArithmeticDataset(paths[2], stoi, block_size, [args.operator], args.prime)
-
-    ops = list(args.operators)          # ['+','-','/']
-    train_dataset = ArithmeticDataset(paths[0], stoi, block_size, ops, args.prime)
-    val_dataset   = ArithmeticDataset(paths[1], stoi, block_size, ops, args.prime)
-    test_dataset  = ArithmeticDataset(paths[2], stoi, block_size, ops, args.prime)
+    train_dataset = ArithmeticDataset(paths[0], stoi, block_size)
+    val_dataset   = ArithmeticDataset(paths[1], stoi, block_size)
+    test_dataset  = ArithmeticDataset(paths[2], stoi, block_size)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
     config = GPTConfig(
-        block_size=block_size - 1,
+        block_size=16,
         vocab_size=len(vocab),
         n_layer=args.n_layer,
         n_head=4,
         n_embd=128,
-        dropout=0.1,
+        dropout=0,
         bias=False,
     )
     device = torch.device(args.device)
     model = GPT(config).to(device)
-    optimizer = model.configure_optimizers(0.1, 3e-4, (0.9, 0.98), args.device)
+    optimizer = model.configure_optimizers(weight_decay, learning_rate, betas, args.device)
+
+    num_warmup_steps = 10
+    # lr_scheduler = get_scheduler(
+    #     name="linear",
+    #     optimizer=optimizer,
+    #     num_warmup_steps=num_warmup_steps,
+    #     num_training_steps=args.max_iters,
+    # )
+
 
     data_iter = iter(train_loader)
+    start = time.time()
     for step in range(1, args.max_iters + 1):
         try:
             x, y = next(data_iter)
@@ -163,6 +149,7 @@ def main() -> None:
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        # lr_scheduler.step() # warmup
         if step % args.eval_interval == 0:
             train_loss_eval, train_acc = evaluate(model, train_loader, device)
             val_loss, val_acc = evaluate(model, val_loader, device)
@@ -170,9 +157,10 @@ def main() -> None:
                 f"step {step} train_loss={train_loss_eval:.4f} train_acc={train_acc:.4f} "
                 f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
             )
-
+    end = time.time()
     test_loss, test_acc = evaluate(model, test_loader, device)
     print(f"test_loss={test_loss:.4f} test_acc={test_acc:.4f}")
+    print(f"Elapsed time: {end - start:.4f} seconds")
 
     ckpt = {
         "model": model.state_dict(),
@@ -180,8 +168,7 @@ def main() -> None:
         "stoi": stoi,
         "itos": itos,
     }
-    # path = os.path.join(args.out_dir, f"model_p{args.prime}_{args.operator}.pt")
-    path = os.path.join(args.out_dir, f"model_p{args.prime}_{''.join(ops)}.pt")
+    path = os.path.join(args.out_dir, f"model_seed={args.seed}_p={args.prime}.pt")
     torch.save(ckpt, path)
     with open(os.path.join(args.out_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump(config.__dict__, f)

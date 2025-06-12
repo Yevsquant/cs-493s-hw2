@@ -72,27 +72,25 @@ seed=2 acc
 Through three seeds of experiments, we noticed that p=113 is harder to learn than using p=97. We guessed that this is because p=113 has larger data diversity. Therefore, under same situation, data of p=113 is more complex to be learned while our model remained relatively simple. The final loss in test dataset across three seeds is 1.3807 for p=97 and 1.3757 for p=113. The final accuracy in test dataset across three seeds is 0.7563 for p=97 and 0.6045 for p=113.
 
 ### 2.3 Grokking
-![loss](lossd23.png) \
-![acc](accd23.png) \
-The checkpoint is [here](/part2/ckpt_task22/) of seed=42. \
+![loss](loss23.png) \
+![acc](acc23.png) \
+The checkpoint is [here](/part2/ckpt_task23/) of seed=42. \
 For training: \
 ```
 python3 train23.py . \
     --prime 97 \
-    --operators "/" \
     --n_layer 2 \
     --max_iters 10000 \
     --eval_interval 100 \
     --batch_size 32 \
     --device cpu
 ```
+We set learning rate = 1e-3, weight decay = 1.0, batch size = 250 (the total training data size is 500), betas = (0.9, 0.98), n_head=4, n_embd=128, n_layer=2, dropout=0. And we trained for 60,000 epochs. (ps. we have tried larger dataset (size = 10000, which covers all possible `a / b = p mod c`), and the validation accuracy stays at 69%. This is because the diversity of the dataset). Due to the limitation of time, we could not train it long enough to see if grokking happened. \
+For inference, `python3 inference.py --prompt "a/b="`, where `a, b <= p=97` and `b != 0`. \
+As shown, we were not grokking as the train loss reaches 0 and train accuracy reaches 1.0. At the same time, validation loss increases and validaiton accuracy remains unchanged even after over 10,000 epochs.
 
 ### 2.4 Ablations/Analysis
-Increase the size of the dataset helps gorkking on division task faster and reliable in validation, not training. As shown,
-![dataset](largedataset.png) \
-Under the condition of small samples, the model quickly remembers the training set (Acc is about 1.0), but due to insufficient patterns, extrapolation is impossible, and the validation set remains near random guessing (about 0.49). This is precisely what is called the silent period in grokking's literature
-
-In the large sample setting, although the memory stage slows down, the verification accuracy significantly improves with training. The gap of the training-verification curve Narrows become smaller comparing with small size sample, indicating that the model learns the generalizable internal representation earlier. We can directly see that the large sample validation accuracy is higher than small sample validation accuracy.
-
-Therefore, in the arithmetic grokking task, the number of training samples is the primary factor determining the generalization speed and final performance. If hardware and time permit, prioritizing the increase of data volume is more effective in eliminating the grokking phenomenon than adjusting the learning rate or regularization in isolation.
-
+Warmup before training helps the model learn faster and is more reliable with high weight decay (weight_decay = 1). Even though we were not grokking, the model with warmup performs better much eariler than the model without warmup.
+As shown in the plot, the model with warmup is more stable. \
+![warmup loss](warmup.png)
+![warmup acc](warmupacc.png)
